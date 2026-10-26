@@ -17,3 +17,6 @@ jobs:
 
       - name: Xem cấu trúc repo # STEP 3: liệt kê file
         run: ls -R
+
+      - name: Python version
+        run: python3 --version
