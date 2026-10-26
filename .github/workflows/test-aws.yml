@@ -1,0 +1,21 @@
+name: Test AWS OIDC
+
+on:
+  workflow_dispatch:          # chạy tay để kiểm tra
+
+permissions:
+  id-token: write             # BẮT BUỘC: cho workflow xin token OIDC
+  contents: read
+
+jobs:
+  check-aws:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Lấy credentials AWS qua OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Xác nhận danh tính
+        run: aws sts get-caller-identity

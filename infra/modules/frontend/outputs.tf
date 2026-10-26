@@ -5,3 +5,7 @@ output "cloudfront_url" {
 output "cloudfront_distribution_id" {
   value = aws_cloudfront_distribution.web.id # dùng cho lệnh invalidate cache khi deploy
 }
+
+output "cloudfront_distribution_arn" {
+  value = aws_cloudfront_distribution.web.arn
+}

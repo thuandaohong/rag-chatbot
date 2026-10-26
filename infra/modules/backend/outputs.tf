@@ -9,3 +9,7 @@ output "lambda_function_name" {
 output "lambda_role_arn" {
   value = aws_iam_role.lambda.arn
 }
+
+output "lambda_function_arn" {
+  value = aws_lambda_function.api.arn
+}
