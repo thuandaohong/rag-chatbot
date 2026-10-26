@@ -8,6 +8,36 @@ variable "github_repo" {
   type        = string
 }
 
+variable "github_owner_id" {
+  description = "ID số (bất biến) của owner GitHub — lấy từ claim sub trong CloudTrail hoặc api.github.com/users/<owner>"
+  type        = string
+}
+
+variable "github_repo_id" {
+  description = "ID số (bất biến) của repo — api.github.com/repos/<owner>/<repo> -> trường id"
+  type        = string
+}
+
+variable "github_deploy_branch" {
+  description = "Chỉ nhánh này được assume role deploy"
+  type        = string
+  default     = "main"
+}
+
+locals {
+  github_owner = split("/", var.github_repo)[0]
+  github_name  = split("/", var.github_repo)[1]
+
+  # Claim `sub` GitHub gửi lên, 2 định dạng:
+  #  - mới (có ID bất biến): repo:owner@ownerId/repo@repoId:ref:refs/heads/main
+  #    -> repo bị xóa rồi người khác tạo lại cùng tên cũng KHÔNG khớp được ID
+  #  - cũ (chỉ tên):         repo:owner/repo:ref:refs/heads/main
+  github_oidc_subs = [
+    "repo:${local.github_owner}@${var.github_owner_id}/${local.github_name}@${var.github_repo_id}:ref:refs/heads/${var.github_deploy_branch}",
+    "repo:${var.github_repo}:ref:refs/heads/${var.github_deploy_branch}",
+  ]
+}
+
 # ---- 1) OIDC provider: AWS tin GitHub làm nguồn danh tính ----
 resource "aws_iam_openid_connect_provider" "github" {
   url            = "https://token.actions.githubusercontent.com"
@@ -33,11 +63,12 @@ data "aws_iam_policy_document" "gha_assume" {
       variable = "token.actions.githubusercontent.com:aud"
       values   = ["sts.amazonaws.com"]
     }
-    # điều kiện 2: KHÓA đúng repo của bạn (chống confused deputy)
+    # điều kiện 2: KHÓA đúng repo + đúng nhánh deploy (chống confused deputy,
+    # và nhánh thử nghiệm/PR không deploy đè production được)
     condition {
-      test     = "StringLike"
+      test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repo}:*"]
+      values   = local.github_oidc_subs
     }
   }
 }
