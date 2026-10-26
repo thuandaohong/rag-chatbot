@@ -1,0 +1,46 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"              # CHỈ chạy khi code backend đổi
+      - ".github/workflows/deploy-backend.yml"
+  workflow_dispatch:              # cho phép chạy tay
+
+permissions:
+  id-token: write                 # xin token OIDC
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Lấy credentials AWS qua OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Đóng gói handler.py thành zip
+        run: |
+          cd backend
+          zip -j handler.zip handler.py
+          # -j: không giữ cấu trúc thư mục, zip phẳng -> handler.py nằm gốc zip
+
+      - name: Cập nhật code Lambda
+        run: |
+          aws lambda update-function-code \
+            --function-name rag-chatbot-api \
+            --zip-file fileb://backend/handler.zip
+
+      - name: Chờ Lambda cập nhật xong
+        run: |
+          aws lambda wait function-updated \
+            --function-name rag-chatbot-api
+
+      - name: Xác nhận
+        run: echo "Đã deploy backend lên Lambda rag-chatbot-api"
