@@ -82,9 +82,13 @@ resource "aws_iam_role" "github_actions" {
 data "aws_iam_policy_document" "gha_deploy" {
   # cập nhật code Lambda
   statement {
-    sid       = "UpdateLambda"
-    effect    = "Allow"
-    actions   = ["lambda:UpdateFunctionCode", "lambda:GetFunction"]
+    sid    = "UpdateLambda"
+    effect = "Allow"
+    actions = [
+      "lambda:UpdateFunctionCode",
+      "lambda:GetFunction",
+      "lambda:GetFunctionConfiguration", # `aws lambda wait function-updated` gọi API này
+    ]
     resources = [module.backend.lambda_function_arn]
   }
   # upload frontend lên bucket web

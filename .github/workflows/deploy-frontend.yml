@@ -1,0 +1,59 @@
+name: Deploy Frontend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/deploy-frontend.yml"
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  WEB_BUCKET: rag-chatbot-web-thuan-20261012     # bucket web
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Cài Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Cài dependency
+        working-directory: frontend
+        run: npm ci              # ci = cài sạch đúng theo lock file (nhanh, ổn định)
+
+      - name: Build React
+        working-directory: frontend
+        env:
+          VITE_API_URL: ${{ vars.VITE_API_URL }}   # URL API nhúng vào lúc build
+        run: npm run build        # tạo thư mục frontend/dist
+
+      - name: Lấy credentials AWS qua OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Upload lên S3
+        run: |
+          aws s3 sync frontend/dist "s3://${WEB_BUCKET}" --delete
+
+      - name: Invalidate CloudFront cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
+            --paths "/*"
+
+      - name: Xác nhận
+        run: echo "Đã deploy frontend lên S3 + invalidate CloudFront"
