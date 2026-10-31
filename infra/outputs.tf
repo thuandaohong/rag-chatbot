@@ -25,3 +25,11 @@ output "cloudfront_url" {
 output "cloudfront_distribution_id" {
   value = module.frontend.cloudfront_distribution_id
 }
+
+output "guardrail_id" {
+  value = module.guardrail.guardrail_id
+}
+
+output "guardrail_version" {
+  value = module.guardrail.guardrail_version
+}
