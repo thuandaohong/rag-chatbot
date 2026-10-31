@@ -5,6 +5,10 @@
 # ---- Bucket TÀI LIỆU (private, chứa PDF nguồn cho Knowledge Base) ----
 resource "aws_s3_bucket" "docs" {
   bucket = var.docs_bucket_name
+
+  tags = {
+    Project = "rag-chatbot"
+  }
 }
 
 resource "aws_s3_bucket_public_access_block" "docs" {
@@ -18,6 +22,10 @@ resource "aws_s3_bucket_public_access_block" "docs" {
 # ---- Bucket WEB (chứa React build, serve qua CloudFront) ----
 resource "aws_s3_bucket" "web" {
   bucket = var.web_bucket_name
+
+  tags = {
+    Project = "rag-chatbot"
+  }
 }
 
 resource "aws_s3_bucket_public_access_block" "web" {
