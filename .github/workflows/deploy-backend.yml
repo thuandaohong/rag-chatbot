@@ -4,43 +4,53 @@ on:
   push:
     branches: [main]
     paths:
-      - "backend/**"              # CHỈ chạy khi code backend đổi
+      - "backend/**"
       - ".github/workflows/deploy-backend.yml"
-  workflow_dispatch:              # cho phép chạy tay
-
-permissions:
-  id-token: write                 # xin token OIDC
-  contents: read
+  workflow_dispatch:
 
 jobs:
-  deploy:
+  # ---------- JOB 1: GATE (lint + test) ----------
+  test:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cài công cụ
+        working-directory: backend
+        run: pip install boto3 pytest ruff
+      - name: Lint (ruff)
+        working-directory: backend
+        run: ruff check .
+      - name: Unit test (pytest)
+        working-directory: backend
+        run: python -m pytest -q
 
+  # ---------- JOB 2: DEPLOY (chỉ chạy nếu test đạt) ----------
+  deploy:
+    needs: test                  # <-- CÁI GATE: test fail thì deploy không chạy
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
       - name: Lấy credentials AWS qua OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-east-1
-
-      - name: Đóng gói handler.py thành zip
+      - name: Đóng gói handler.py
         run: |
           cd backend
           zip -j handler.zip handler.py
-          # -j: không giữ cấu trúc thư mục, zip phẳng -> handler.py nằm gốc zip
-
       - name: Cập nhật code Lambda
         run: |
           aws lambda update-function-code \
             --function-name rag-chatbot-api \
             --zip-file fileb://backend/handler.zip
-
       - name: Chờ Lambda cập nhật xong
-        run: |
-          aws lambda wait function-updated \
-            --function-name rag-chatbot-api
-
+        run: aws lambda wait function-updated --function-name rag-chatbot-api
       - name: Xác nhận
-        run: echo "Đã deploy backend lên Lambda rag-chatbot-api"
+        run: echo "Deploy backend xong"
