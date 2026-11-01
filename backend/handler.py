@@ -23,6 +23,8 @@ Quyền IAM cần cho role Lambda: bedrock:Retrieve + bedrock:InvokeModel + bedr
 
 Structured logging (Day 37): MỖI request ghi đúng 1 dòng JSON {"type": "rag_request", ...}
 (status, latency từng bước, token, guardrail...) -> query bằng CloudWatch Logs Insights.
+Token (Day 38) là số CHÍNH XÁC từ `usage` của Converse (không ước lượng); guardrail tính
+tiền theo text unit (1 unit = tối đa 1000 ký tự, mỗi policy tính riêng) -> log riêng.
 KHÔNG log nội dung câu hỏi/câu trả lời (có thể chứa PII), chỉ log độ dài.
 """
 
@@ -79,16 +81,25 @@ class Timer:
         return _Step()
 
 
+# Field `usage` của ApplyGuardrail -> tên ngắn trong log. Mỗi policy tính tiền riêng theo unit.
+GUARDRAIL_UNIT_FIELDS = {
+    "contentPolicyUnits": "content",
+    "topicPolicyUnits": "topic",
+    "sensitiveInformationPolicyUnits": "pii",
+}
+
+
 def check_guardrail(text: str, source: str) -> dict:
     """Chạy guardrail trên 1 đoạn text. source = "INPUT" (câu hỏi) | "OUTPUT" (trả lời).
 
-    Trả về {"action": "NONE"|"MASKED"|"BLOCKED", "text": ..., "reasons": [...]}
+    Trả về {"action": "NONE"|"MASKED"|"BLOCKED", "text": ..., "reasons": [...], "units": {...}}
       - NONE    : không vi phạm, text giữ nguyên
       - MASKED  : PII bị che ({EMAIL}, {PHONE}...), text là bản đã che
       - BLOCKED : vi phạm, text là thông báo chặn cấu hình trong guardrail
+    units = text unit đã tính tiền cho lần gọi này, vd {"content": 1, "topic": 1, "pii": 1}
     """
     if not GUARDRAIL_ENABLED:
-        return {"action": "NONE", "text": text, "reasons": []}
+        return {"action": "NONE", "text": text, "reasons": [], "units": {}}
 
     resp = llm_client.apply_guardrail(
         guardrailIdentifier=GUARDRAIL_ID,
@@ -96,8 +107,10 @@ def check_guardrail(text: str, source: str) -> dict:
         source=source,
         content=[{"text": {"text": text}}],
     )
+    usage = resp.get("usage", {})
+    units = {short: usage.get(field, 0) for field, short in GUARDRAIL_UNIT_FIELDS.items()}
     if resp.get("action") != "GUARDRAIL_INTERVENED":
-        return {"action": "NONE", "text": text, "reasons": []}
+        return {"action": "NONE", "text": text, "reasons": [], "units": units}
 
     # Cả "chặn" lẫn "che PII" đều trả GUARDRAIL_INTERVENED -> phân biệt qua assessments
     reasons, blocked = [], False
@@ -117,7 +130,8 @@ def check_guardrail(text: str, source: str) -> dict:
                 blocked = True
 
     outputs = resp.get("outputs") or [{"text": text}]
-    return {"action": "BLOCKED" if blocked else "MASKED", "text": outputs[0]["text"], "reasons": reasons}
+    return {"action": "BLOCKED" if blocked else "MASKED", "text": outputs[0]["text"],
+            "reasons": reasons, "units": units}
 
 
 def retrieve(question: str) -> list:
@@ -268,6 +282,12 @@ def lambda_handler(event, context):
     g_in, g_out = result["guardrail"]["input"], result["guardrail"]["output"]
     usage = result["usage"]
 
+    # Cộng text unit của 2 lần gọi guardrail (input + output) -> Day 39 quy ra tiền
+    guardrail_units = {short: 0 for short in GUARDRAIL_UNIT_FIELDS.values()}
+    for g in (g_in, g_out):
+        for k, v in (g["units"] if g else {}).items():
+            guardrail_units[k] += v
+
     # 1 dòng JSON có cấu trúc / request. Chỉ log ĐỘ DÀI, không log nội dung (tránh lộ PII).
     log_event(
         **base,
@@ -284,6 +304,7 @@ def lambda_handler(event, context):
         guardrail_input=g_in["action"] if g_in else "SKIPPED",
         guardrail_output=g_out["action"] if g_out else "SKIPPED",
         guardrail_reasons=(g_in["reasons"] if g_in else []) + (g_out["reasons"] if g_out else []),
+        guardrail_units=guardrail_units,            # {"content", "topic", "pii"} cộng cả 2 chiều
     )
 
     return _response(200, {"answer": result["answer"], "sources": sources})
