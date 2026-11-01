@@ -29,7 +29,7 @@ data "aws_iam_policy_document" "bedrock" {
   statement {
     sid     = "AllowBedrockRAG"
     effect  = "Allow"
-    actions = ["bedrock:RetrieveAndGenerate", "bedrock:Retrieve"]
+    actions = ["bedrock:Retrieve"] # handler dùng retrieve + converse (KB MANAGED không hỗ trợ RetrieveAndGenerate)
     resources = [
       var.kb_arn
     ]
@@ -40,6 +40,22 @@ data "aws_iam_policy_document" "bedrock" {
     actions   = ["bedrock:InvokeModel"]
     resources = ["arn:aws:bedrock:${data.aws_region.current.region}::foundation-model/*"]
   }
+}
+
+# ---- Quyền chạy guardrail: trên guardrail + profile ở MỌI destination region (tier Standard) ----
+data "aws_iam_policy_document" "guardrail" {
+  statement {
+    sid       = "AllowApplyGuardrail"
+    effect    = "Allow"
+    actions   = ["bedrock:ApplyGuardrail"]
+    resources = concat([var.guardrail_arn], var.guardrail_profile_arns)
+  }
+}
+
+resource "aws_iam_role_policy" "guardrail" {
+  name   = "${var.project}-guardrail"
+  role   = aws_iam_role.lambda.id
+  policy = data.aws_iam_policy_document.guardrail.json
 }
 
 resource "aws_iam_role_policy" "bedrock" {

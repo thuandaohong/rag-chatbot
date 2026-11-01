@@ -62,20 +62,29 @@ resource "aws_bedrock_guardrail" "main" {
   }
 
   # ---- 3) PII: mức nhạy cảm khác nhau -> xử lý khác nhau ----
+  # PHẢI khai báo input_*/output_* rõ ràng: nếu chỉ có `action`, ANONYMIZE chỉ áp
+  # cho output, câu hỏi chứa email/phone đi thẳng tới KB + model (đã test Day 36).
   sensitive_information_policy_config {
     # Che (thay bằng {EMAIL}, {PHONE}) nhưng vẫn trả lời
-    pii_entities_config {
-      type   = "EMAIL"
-      action = "ANONYMIZE"
-    }
-    pii_entities_config {
-      type   = "PHONE"
-      action = "ANONYMIZE"
+    dynamic "pii_entities_config" {
+      for_each = toset(["EMAIL", "PHONE"])
+      content {
+        type           = pii_entities_config.value
+        action         = "ANONYMIZE"
+        input_action   = "ANONYMIZE"
+        input_enabled  = true
+        output_action  = "ANONYMIZE"
+        output_enabled = true
+      }
     }
     # Số thẻ: chặn hẳn cả câu
     pii_entities_config {
-      type   = "CREDIT_DEBIT_CARD_NUMBER"
-      action = "BLOCK"
+      type           = "CREDIT_DEBIT_CARD_NUMBER"
+      action         = "BLOCK"
+      input_action   = "BLOCK"
+      input_enabled  = true
+      output_action  = "BLOCK"
+      output_enabled = true
     }
   }
 
