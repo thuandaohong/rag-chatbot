@@ -27,3 +27,23 @@ variable "build_dir" {
   description = "Thư mục chứa file zip build ra"
   type        = string
 }
+
+variable "guardrail_id" {
+  description = "Bedrock Guardrail ID (module guardrail) -> env GUARDRAIL_ID"
+  type        = string
+}
+
+variable "guardrail_version" {
+  description = "Version cố định của guardrail -> env GUARDRAIL_VERSION"
+  type        = string
+}
+
+variable "guardrail_arn" {
+  description = "ARN guardrail — khóa quyền bedrock:ApplyGuardrail"
+  type        = string
+}
+
+variable "guardrail_profile_arns" {
+  description = "ARN cross-region guardrail profile ở mọi destination region (tier Standard cần)"
+  type        = list(string)
+}

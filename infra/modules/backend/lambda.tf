@@ -20,10 +20,18 @@ resource "aws_lambda_function" "api" {
   filename         = data.archive_file.api.output_path
   source_code_hash = data.archive_file.api.output_base64sha256 # đổi code -> TF biết redeploy
 
+  # Code do pipeline deploy-backend đẩy (update-function-code), Terraform chỉ quản cấu hình
+  # (env, memory, timeout, role). Không ignore -> 2 bên giành nhau, apply sau đè code của CI.
+  lifecycle {
+    ignore_changes = [filename, source_code_hash]
+  }
+
   environment {
     variables = {
-      KB_ID    = var.kb_id
-      MODEL_ID = var.model_id
+      KB_ID             = var.kb_id
+      MODEL_ID          = var.model_id
+      GUARDRAIL_ID      = var.guardrail_id # feature flag: thiếu 1 trong 2 -> handler bỏ qua guardrail
+      GUARDRAIL_VERSION = var.guardrail_version
     }
   }
 }
