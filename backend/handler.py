@@ -20,11 +20,16 @@ converse có cả tài liệu -> guardrail sẽ quét cả tài liệu, dễ ch�
     câu hỏi  -> ApplyGuardrail(INPUT)  -> chặn thì trả luôn (không tốn retrieve/LLM)
     trả lời  -> ApplyGuardrail(OUTPUT) -> chặn hoặc che PII trước khi trả
 Quyền IAM cần cho role Lambda: bedrock:Retrieve + bedrock:InvokeModel + bedrock:ApplyGuardrail.
+
+Structured logging (Day 37): MỖI request ghi đúng 1 dòng JSON {"type": "rag_request", ...}
+(status, latency từng bước, token, guardrail...) -> query bằng CloudWatch Logs Insights.
+KHÔNG log nội dung câu hỏi/câu trả lời (có thể chứa PII), chỉ log độ dài.
 """
 
 import base64
 import json
 import os
+import time
 
 import boto3
 from botocore.exceptions import ClientError
@@ -37,6 +42,8 @@ GUARDRAIL_ID = os.environ.get("GUARDRAIL_ID", "")
 GUARDRAIL_VERSION = os.environ.get("GUARDRAIL_VERSION", "")
 GUARDRAIL_ENABLED = bool(GUARDRAIL_ID and GUARDRAIL_VERSION)
 
+_cold_start = True  # True ở request đầu tiên của mỗi container Lambda mới
+
 # Tạo client 1 lần ở ngoài handler -> tái dùng giữa các lần gọi (nhanh hơn)
 kb_client = boto3.client("bedrock-agent-runtime", region_name=REGION)
 llm_client = boto3.client("bedrock-runtime", region_name=REGION)
@@ -46,6 +53,30 @@ SYSTEM_PROMPT = (
     "Chỉ dùng thông tin trong phần TÀI LIỆU. Nếu tài liệu không có thông tin, "
     "hãy nói rõ là không tìm thấy trong tài liệu. Trả lời cùng ngôn ngữ với câu hỏi."
 )
+
+
+def log_event(**fields) -> None:
+    """Ghi 1 dòng JSON ra CloudWatch (stdout của Lambda) -> Logs Insights tự tách field."""
+    print(json.dumps({"type": "rag_request", **fields}, ensure_ascii=False))
+
+
+class Timer:
+    """Đo thời gian từng bước: `with timer("retrieve"): ...` -> timer.ms["retrieve"]."""
+
+    def __init__(self):
+        self.ms = {}
+
+    def __call__(self, name: str):
+        timer = self
+
+        class _Step:
+            def __enter__(self):
+                self.t0 = time.perf_counter()
+
+            def __exit__(self, *exc):
+                timer.ms[name] = int((time.perf_counter() - self.t0) * 1000)
+
+        return _Step()
 
 
 def check_guardrail(text: str, source: str) -> dict:
@@ -98,7 +129,7 @@ def retrieve(question: str) -> list:
     return resp.get("retrievalResults", [])[:TOP_K]
 
 
-def generate(question: str, chunks: list) -> str:
+def generate(question: str, chunks: list) -> tuple:
     """Bước 2: đưa câu hỏi + các đoạn tài liệu cho model viết câu trả lời."""
     context = "\n\n".join(
         f"[{i}] {c.get('content', {}).get('text', '')}"
@@ -112,29 +143,44 @@ def generate(question: str, chunks: list) -> str:
         messages=[{"role": "user", "content": [{"text": prompt}]}],
         inferenceConfig={"maxTokens": 1024, "temperature": 0.2},
     )
-    return resp["output"]["message"]["content"][0]["text"]
+    usage = resp.get("usage", {})  # Day 38 dùng token để tính tiền
+    return resp["output"]["message"]["content"][0]["text"], usage
 
 
-def ask(question: str) -> dict:
-    """Chạy đủ RAG có guardrail 2 đầu. Trả về câu trả lời, các đoạn đã dùng, kết quả guardrail."""
+def ask(question: str, timer: Timer) -> dict:
+    """Chạy đủ RAG có guardrail 2 đầu.
+
+    Trả về {"answer", "chunks", "guardrail": {"input", "output"}, "usage"}; thời gian
+    từng bước ghi vào `timer` (bước nào không chạy thì không có trong timer.ms).
+    """
+    result = {"answer": "", "chunks": [], "guardrail": {"input": None, "output": None}, "usage": {}}
+
     # 1) Guardrail chiều vào: chặn sớm -> không tốn tiền retrieve + LLM
-    g_in = check_guardrail(question, "INPUT")
+    with timer("guardrail_in"):
+        g_in = check_guardrail(question, "INPUT")
+    result["guardrail"]["input"] = g_in
     if g_in["action"] == "BLOCKED":
-        return {"answer": g_in["text"], "chunks": [], "guardrail": {"input": g_in, "output": None}}
+        result["answer"] = g_in["text"]
+        return result
     question = g_in["text"]  # bản đã che PII (nếu có) -> PII không đi tới KB/model
 
     # 2) RAG
-    chunks = retrieve(question)
+    with timer("retrieve"):
+        chunks = retrieve(question)
     if not chunks:
-        return {"answer": "(Không tìm thấy tài liệu liên quan.)", "chunks": [],
-                "guardrail": {"input": g_in, "output": None}}
-    answer = generate(question, chunks)
+        result["answer"] = "(Không tìm thấy tài liệu liên quan.)"
+        return result
+    with timer("generate"):
+        answer, result["usage"] = generate(question, chunks)
 
     # 3) Guardrail chiều ra: chặn nội dung độc / che PII model lỡ sinh ra
-    g_out = check_guardrail(answer, "OUTPUT")
-    if g_out["action"] == "BLOCKED":
-        return {"answer": g_out["text"], "chunks": [], "guardrail": {"input": g_in, "output": g_out}}
-    return {"answer": g_out["text"], "chunks": chunks, "guardrail": {"input": g_in, "output": g_out}}
+    with timer("guardrail_out"):
+        g_out = check_guardrail(answer, "OUTPUT")
+    result["guardrail"]["output"] = g_out
+    result["answer"] = g_out["text"]
+    if g_out["action"] != "BLOCKED":
+        result["chunks"] = chunks
+    return result
 
 
 def extract_sources(chunks: list) -> list:
@@ -167,6 +213,17 @@ def _http_method(event: dict) -> str:
 
 
 def lambda_handler(event, context):
+    global _cold_start
+    t_start = time.perf_counter()
+    base = {
+        "request_id": getattr(context, "aws_request_id", None),
+        "cold_start": _cold_start,
+    }
+    _cold_start = False
+
+    def elapsed_ms() -> int:
+        return int((time.perf_counter() - t_start) * 1000)
+
     # 0) Trình duyệt gửi OPTIONS (CORS preflight) trước khi POST JSON
     if _http_method(event) == "OPTIONS":
         return _response(200, {})
@@ -179,33 +236,54 @@ def lambda_handler(event, context):
             raw_body = base64.b64decode(raw_body).decode("utf-8")
         data = json.loads(raw_body)
     except (TypeError, ValueError):
+        log_event(**base, status=400, error="bad_json", latency_ms=elapsed_ms())
         return _response(400, {"error": "Body không phải JSON hợp lệ"})
 
     if not isinstance(data, dict):
+        log_event(**base, status=400, error="body_not_object", latency_ms=elapsed_ms())
         return _response(400, {"error": "Body phải là object JSON"})
 
     question = data.get("question")
     if not isinstance(question, str) or not question.strip():
+        log_event(**base, status=400, error="missing_question", latency_ms=elapsed_ms())
         return _response(400, {"error": "Thiếu trường 'question' (chuỗi)"})
     question = question.strip()
 
     # 2) Gọi RAG
+    timer = Timer()
     try:
-        result = ask(question)
+        result = ask(question, timer)
     except ClientError as e:
         code = e.response.get("Error", {}).get("Code", "Unknown")
         msg = e.response.get("Error", {}).get("Message", str(e))
-        # In ra log CloudWatch để debug
-        print(f"Bedrock error: {code} - {msg}")
+        log_event(**base, status=502, error=code, latency_ms=elapsed_ms(), stage_ms=timer.ms)
+        print(f"Bedrock error: {code} - {msg}")  # chi tiết lỗi để debug (không chứa PII)
         return _response(502, {"error": f"{code}: {msg}"})
-
-    # Log khi guardrail can thiệp (Day 37 sẽ chuyển thành structured log + metric).
-    # Chỉ log action + lý do, KHÔNG log câu hỏi gốc (có thể chứa PII).
-    for side, g in result["guardrail"].items():
-        if g and g["action"] != "NONE":
-            print(json.dumps({"event": "guardrail_intervened", "side": side,
-                              "action": g["action"], "reasons": g["reasons"]}))
+    except Exception as e:  # lỗi code bất ngờ: vẫn có 1 dòng log để đếm tỉ lệ lỗi
+        log_event(**base, status=500, error=type(e).__name__, latency_ms=elapsed_ms(), stage_ms=timer.ms)
+        raise
 
     # 3) Trả về câu trả lời + nguồn
     sources = extract_sources(result["chunks"])
+    g_in, g_out = result["guardrail"]["input"], result["guardrail"]["output"]
+    usage = result["usage"]
+
+    # 1 dòng JSON có cấu trúc / request. Chỉ log ĐỘ DÀI, không log nội dung (tránh lộ PII).
+    log_event(
+        **base,
+        status=200,
+        latency_ms=elapsed_ms(),
+        stage_ms=timer.ms,                          # {guardrail_in, retrieve, generate, guardrail_out}
+        model_id=MODEL_ID,
+        question_len=len(question),
+        answer_len=len(result["answer"]),
+        num_chunks=len(result["chunks"]),
+        num_sources=len(sources),
+        input_tokens=usage.get("inputTokens", 0),   # 0 nếu không gọi model (bị chặn / không có tài liệu)
+        output_tokens=usage.get("outputTokens", 0),
+        guardrail_input=g_in["action"] if g_in else "SKIPPED",
+        guardrail_output=g_out["action"] if g_out else "SKIPPED",
+        guardrail_reasons=(g_in["reasons"] if g_in else []) + (g_out["reasons"] if g_out else []),
+    )
+
     return _response(200, {"answer": result["answer"], "sources": sources})

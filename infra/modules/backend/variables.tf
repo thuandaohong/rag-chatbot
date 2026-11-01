@@ -47,3 +47,9 @@ variable "guardrail_profile_arns" {
   description = "ARN cross-region guardrail profile ở mọi destination region (tier Standard cần)"
   type        = list(string)
 }
+
+variable "log_retention_days" {
+  description = "Số ngày giữ log Lambda trên CloudWatch (giá trị hợp lệ: 1, 3, 5, 7, 14, 30, 60, 90...)"
+  type        = number
+  default     = 30
+}
