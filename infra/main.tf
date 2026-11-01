@@ -34,3 +34,8 @@ module "frontend" {
   web_bucket_arn                  = module.storage.web_bucket_arn
   web_bucket_regional_domain_name = module.storage.web_bucket_regional_domain_name
 }
+
+module "guardrail" {
+  source  = "./modules/guardrail"
+  project = var.project
+}
