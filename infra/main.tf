@@ -1,6 +1,6 @@
 # ============================================================
 # main.tf — gọi & nối các module (output module này -> input module kia)
-#   storage ──> knowledge_base ──> backend
+#   storage ──> knowledge_base ──> backend <── guardrail
 #      └──────> frontend
 # ============================================================
 
@@ -25,6 +25,11 @@ module "backend" {
   kb_arn              = module.knowledge_base.kb_arn
   handler_source_file = "${path.root}/../backend/handler.py"
   build_dir           = "${path.root}/build"
+
+  guardrail_id           = module.guardrail.guardrail_id
+  guardrail_version      = module.guardrail.guardrail_version
+  guardrail_arn          = module.guardrail.guardrail_arn
+  guardrail_profile_arns = module.guardrail.guardrail_profile_arns
 }
 
 module "frontend" {
