@@ -41,9 +41,16 @@ locals {
       | stats avg(stage_ms.guardrail_in) as guardrail_in, avg(stage_ms.retrieve) as retrieve, avg(stage_ms.generate) as generate, avg(stage_ms.guardrail_out) as guardrail_out, avg(latency_ms) as total
     EOT
 
+    # Tên cột KHÁC tên field gốc: `sum(input_tokens) as input_tokens` làm Logs Insights bỏ cột (lỗi Day 37)
     "tokens-daily" = <<-EOT
       filter type = "rag_request" and status = 200
-      | stats sum(input_tokens) as input_tokens, sum(output_tokens) as output_tokens, count(*) as requests by bin(1d)
+      | stats sum(input_tokens) as total_input_tokens, sum(output_tokens) as total_output_tokens, avg(input_tokens) as avg_input_tokens, count(*) as requests by bin(1d)
+    EOT
+
+    # Guardrail tính tiền theo text unit (không theo token), mỗi policy riêng -> Day 39 quy ra USD
+    "guardrail-units-daily" = <<-EOT
+      filter type = "rag_request" and status = 200
+      | stats sum(guardrail_units.content) as content_units, sum(guardrail_units.topic) as topic_units, sum(guardrail_units.pii) as pii_units, count(*) as requests by bin(1d)
     EOT
 
     "slow-requests" = <<-EOT
