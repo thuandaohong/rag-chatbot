@@ -25,6 +25,8 @@ Structured logging (Day 37): MỖI request ghi đúng 1 dòng JSON {"type": "rag
 (status, latency từng bước, token, guardrail...) -> query bằng CloudWatch Logs Insights.
 Token (Day 38) là số CHÍNH XÁC từ `usage` của Converse (không ước lượng); guardrail tính
 tiền theo text unit (1 unit = tối đa 1000 ký tự, mỗi policy tính riêng) -> log riêng.
+Cost (Day 39): quy token + text unit + số lần Retrieve ra USD theo bảng giá PRICING_JSON
+(Terraform truyền vào). Đo thật: model chỉ ~7% chi phí, Retrieve + guardrail ~93%.
 KHÔNG log nội dung câu hỏi/câu trả lời (có thể chứa PII), chỉ log độ dài.
 """
 
@@ -43,6 +45,18 @@ TOP_K = int(os.environ.get("TOP_K", "5"))
 GUARDRAIL_ID = os.environ.get("GUARDRAIL_ID", "")
 GUARDRAIL_VERSION = os.environ.get("GUARDRAIL_VERSION", "")
 GUARDRAIL_ENABLED = bool(GUARDRAIL_ID and GUARDRAIL_VERSION)
+
+# Bảng giá USD (us-east-1). Nguồn thật nằm ở Terraform (biến `pricing`) -> env PRICING_JSON;
+# default ở đây chỉ để chạy local. Key thiếu trong env -> dùng default tương ứng.
+DEFAULT_PRICING = {
+    "llm_input_per_1m_tokens": 0.06,       # Nova Lite input
+    "llm_output_per_1m_tokens": 0.24,      # Nova Lite output
+    "retrieve_per_1k_calls": 1.00,         # Retrieve API, Knowledge Base loại MANAGED
+    "guardrail_content_per_1k_units": 0.15,
+    "guardrail_topic_per_1k_units": 0.15,
+    "guardrail_pii_per_1k_units": 0.10,
+}
+PRICING = {**DEFAULT_PRICING, **json.loads(os.environ.get("PRICING_JSON") or "{}")}
 
 _cold_start = True  # True ở request đầu tiên của mỗi container Lambda mới
 
@@ -87,6 +101,28 @@ GUARDRAIL_UNIT_FIELDS = {
     "topicPolicyUnits": "topic",
     "sensitiveInformationPolicyUnits": "pii",
 }
+
+
+def compute_cost(usage: dict, guardrail_units: dict, retrieve_calls: int) -> dict:
+    """Quy số đo của 1 request ra USD, tách theo thành phần.
+
+    usage           : {"inputTokens", "outputTokens"} từ Converse ({} nếu không gọi model)
+    guardrail_units : {"content", "topic", "pii"} đã cộng 2 chiều
+    retrieve_calls  : 0 hoặc 1 (bị chặn ở input thì không gọi Retrieve)
+    """
+    p = PRICING
+    llm = (usage.get("inputTokens", 0) / 1_000_000 * p["llm_input_per_1m_tokens"]
+           + usage.get("outputTokens", 0) / 1_000_000 * p["llm_output_per_1m_tokens"])
+    retrieve = retrieve_calls / 1_000 * p["retrieve_per_1k_calls"]
+    guardrail = sum(guardrail_units.get(k, 0) / 1_000 * p[f"guardrail_{k}_per_1k_units"]
+                    for k in ("content", "topic", "pii"))
+    # round 8 chữ số: chi phí cỡ micro-đô, round 6 dễ thành 0 với request bị chặn
+    return {
+        "retrieve": round(retrieve, 8),
+        "guardrail": round(guardrail, 8),
+        "llm": round(llm, 8),
+        "total": round(retrieve + guardrail + llm, 8),
+    }
 
 
 def check_guardrail(text: str, source: str) -> dict:
@@ -305,6 +341,8 @@ def lambda_handler(event, context):
         guardrail_output=g_out["action"] if g_out else "SKIPPED",
         guardrail_reasons=(g_in["reasons"] if g_in else []) + (g_out["reasons"] if g_out else []),
         guardrail_units=guardrail_units,            # {"content", "topic", "pii"} cộng cả 2 chiều
+        # "retrieve" có trong timer khi Retrieve đã chạy (bị chặn ở input thì không)
+        cost_usd=compute_cost(usage, guardrail_units, 1 if "retrieve" in timer.ms else 0),
     )
 
     return _response(200, {"answer": result["answer"], "sources": sources})
