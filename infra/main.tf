@@ -52,4 +52,5 @@ module "monitoring" {
   log_group_name = module.backend.log_group_name
   function_name  = module.backend.lambda_function_name
   api_id         = module.backend.api_id
+  alert_email    = var.alert_email
 }
