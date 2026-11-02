@@ -22,6 +22,8 @@ env:
   TF_VERSION: "1.17.0"     # >= 1.10 (providers.tf yêu cầu, vì use_lockfile)
   TF_IN_AUTOMATION: "true" # bớt các gợi ý "chạy lệnh X tiếp theo" trong output
   AWS_REGION: us-east-1
+  # Biến nhạy cảm không commit (repo public) -> Terraform tự đọc env TF_VAR_<tên biến>
+  TF_VAR_alert_email: ${{ secrets.ALERT_EMAIL }}
 
 jobs:
   # ---------- PLAN: chạy trên Pull Request, role CHỈ ĐỌC ----------

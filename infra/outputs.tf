@@ -37,3 +37,7 @@ output "guardrail_version" {
 output "dashboard_url" {
   value = module.monitoring.dashboard_url
 }
+
+output "alarm_names" {
+  value = module.monitoring.alarm_names
+}
