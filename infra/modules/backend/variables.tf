@@ -53,3 +53,22 @@ variable "log_retention_days" {
   type        = number
   default     = 30
 }
+
+variable "pricing" {
+  description = <<-EOT
+    Bảng giá USD để Lambda tính cost mỗi request (Day 39) -> env PRICING_JSON.
+    Nguồn (us-east-1, kiểm tra 2026-11): Nova Lite từ AWS Price List API
+    (`aws pricing get-products --service-code AmazonBedrock`), Retrieve + Guardrails
+    từ https://aws.amazon.com/bedrock/pricing/ (Standard tier cùng giá Classic).
+    Đổi model / giá đổi -> sửa ở đây, không sửa code.
+  EOT
+  type        = map(number)
+  default = {
+    llm_input_per_1m_tokens        = 0.06 # Nova Lite input
+    llm_output_per_1m_tokens       = 0.24 # Nova Lite output
+    retrieve_per_1k_calls          = 1.00 # Retrieve API, KB loại MANAGED
+    guardrail_content_per_1k_units = 0.15
+    guardrail_topic_per_1k_units   = 0.15
+    guardrail_pii_per_1k_units     = 0.10
+  }
+}

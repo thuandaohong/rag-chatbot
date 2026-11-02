@@ -53,6 +53,18 @@ locals {
       | stats sum(guardrail_units.content) as content_units, sum(guardrail_units.topic) as topic_units, sum(guardrail_units.pii) as pii_units, count(*) as requests by bin(1d)
     EOT
 
+    # Day 39: chi phí. usd_per_1k_requests = dự phóng "1000 câu tốn bao nhiêu"
+    "cost-daily" = <<-EOT
+      filter type = "rag_request" and status = 200
+      | stats sum(cost_usd.total) as total_usd, avg(cost_usd.total) as avg_usd_per_request, avg(cost_usd.total) * 1000 as usd_per_1k_requests, count(*) as requests by bin(1d)
+    EOT
+
+    # Tiền đi đâu: Retrieve vs guardrail vs model (đo thật: model ~7%)
+    "cost-breakdown" = <<-EOT
+      filter type = "rag_request" and status = 200
+      | stats sum(cost_usd.retrieve) as retrieve_usd, sum(cost_usd.guardrail) as guardrail_usd, sum(cost_usd.llm) as llm_usd, sum(cost_usd.total) as total_usd, sum(cost_usd.llm) / sum(cost_usd.total) * 100 as llm_pct
+    EOT
+
     "slow-requests" = <<-EOT
       filter type = "rag_request" and latency_ms > 8000
       | fields @timestamp, request_id, latency_ms, stage_ms.retrieve, stage_ms.generate, cold_start

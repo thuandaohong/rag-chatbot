@@ -44,3 +44,12 @@ module "guardrail" {
   source  = "./modules/guardrail"
   project = var.project
 }
+
+module "monitoring" {
+  source         = "./modules/monitoring"
+  project        = var.project
+  region         = var.region
+  log_group_name = module.backend.log_group_name
+  function_name  = module.backend.lambda_function_name
+  api_id         = module.backend.api_id
+}
