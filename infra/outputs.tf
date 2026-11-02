@@ -33,3 +33,7 @@ output "guardrail_id" {
 output "guardrail_version" {
   value = module.guardrail.guardrail_version
 }
+
+output "dashboard_url" {
+  value = module.monitoring.dashboard_url
+}
