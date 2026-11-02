@@ -19,3 +19,9 @@ variable "project" {
   type        = string
   default     = "rag-chatbot"
 }
+
+variable "alert_email" {
+  description = "Email nhận alarm. Truyền qua env TF_VAR_alert_email (CI: secret ALERT_EMAIL) — không commit vào tfvars vì repo public"
+  type        = string
+  sensitive   = true
+}
