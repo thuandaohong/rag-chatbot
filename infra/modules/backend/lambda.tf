@@ -32,6 +32,7 @@ resource "aws_lambda_function" "api" {
       MODEL_ID          = var.model_id
       GUARDRAIL_ID      = var.guardrail_id # feature flag: thiếu 1 trong 2 -> handler bỏ qua guardrail
       GUARDRAIL_VERSION = var.guardrail_version
+      PRICING_JSON      = jsonencode(var.pricing) # handler tính cost_usd mỗi request
     }
   }
 }
