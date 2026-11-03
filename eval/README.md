@@ -7,6 +7,34 @@
 |---|---|
 | `golden.jsonl` | Bộ câu hỏi chuẩn — mỗi dòng 1 câu (JSON) |
 | `draft_golden.py` | Script soạn **bản nháp** câu `in_doc` / `multi_hop` từ chính tài liệu trong KB |
+| `run_eval.py` | Chạy bộ đề qua đúng pipeline `handler.ask()`, lưu kết quả để chấm (E2) |
+| `results/` | Kết quả mỗi lần chạy (không commit) |
+
+## Chạy eval (E2)
+
+```bash
+# đủ bộ đề, cấu hình mặc định = env của Lambda production
+python eval/run_eval.py
+# thử vài câu (đỡ tốn tiền)
+python eval/run_eval.py --ids doc-01,out-02,guard-block-01
+python eval/run_eval.py --limit 5
+# lấy env y hệt Lambda đang chạy (KB, model, guardrail, bảng giá)
+python eval/run_eval.py --env-from-lambda rag-chatbot-api
+# thử cấu hình khác: env của shell được ưu tiên
+TOP_K=3 python eval/run_eval.py
+```
+
+Import `ask()` thay vì gọi API: có **nội dung** đoạn tài liệu (để chấm groundedness), chạy được
+code trong PR trước khi deploy, có sẵn token / guardrail / chi phí. Script đặt env **trước** khi
+import handler (handler đọc env lúc import; thiếu `GUARDRAIL_ID` = chạy không guardrail mà không báo).
+
+Mỗi lần chạy tạo 2 file trong `results/`:
+- `<run_id>.jsonl`: mỗi câu 1 dòng — `answer`, `chunks` (source, score, **text**), `sources`,
+  `guardrail_input/output`, token, `guardrail_units`, `stage_ms`, `latency_ms`, `cost_usd`, `error`.
+- `<run_id>.meta.json`: commit (+ dirty), model, top_k, guardrail version, **hash system prompt**,
+  **hash golden**, thời gian, tóm tắt. Đổi prompt/đề -> hash đổi -> không so nhầm 2 lần chạy.
+
+Một lần chạy đủ 33 câu: ~65s (3 workers), **~$0.064**.
 
 ## Cấu trúc 1 dòng
 
@@ -53,6 +81,19 @@ Với mỗi dòng: đọc `question` + `expected` + `evidence`, rồi:
 - Guardrail (n8p73nudulzi v2): **9/9** đúng nhãn `should_block`, 3 câu "nhạy cảm nhưng hợp lệ" không bị chặn nhầm.
 - Retrieval: 16/18 câu `in_doc`/`multi_hop` lấy được nguồn mong đợi trong top-5. `multi-01`, `multi-03`
   chỉ lấy được 1/2 tài liệu -> giữ lại làm case khó cho Module C (rerank / top-K).
+
+## Lần chạy đầu tiên (2026-11-03, commit 0d38ac1, Nova Lite, top_k=5, guardrail v2)
+
+33/33 câu chạy xong, 0 lỗi, $0.064. Chưa chấm điểm (E3), nhưng đọc kết quả thô đã thấy 3 vấn đề thật:
+
+1. **Câu hỏi tiếng Anh -> trả lời tiếng Việt: 13/13 câu.** System prompt dặn "trả lời cùng ngôn
+   ngữ với câu hỏi" nhưng prompt + nhãn `TÀI LIỆU:` / `CÂU HỎI:` đều tiếng Việt -> model nghiêng
+   về tiếng Việt. E3 cần một tiêu chí "đúng ngôn ngữ".
+2. **`out-02` lọt bẫy**: "Write a Python function..." -> bot viết code thay vì nói tài liệu không
+   có. 5/6 câu bẫy còn lại trả lời đúng "Không tìm thấy thông tin... trong tài liệu".
+3. **Score retrieve không tách được câu liên quan / không liên quan**: top score câu `in_doc`
+   0.570–0.977 (tb 0.833), câu `out_of_doc` 0.518–0.972 (tb 0.733) -> lọc đoạn theo ngưỡng score
+   (ý tưởng Module C) sẽ không hiệu quả.
 
 ## ⚠️ Vấn đề dữ liệu phát hiện khi làm E1
 
