@@ -18,3 +18,5 @@ infra/build/
 .DS_Store
 # Lock file provider PHẢI commit (CI dùng đúng version) — ghi đè ~/.gitignore_global
 !infra/.terraform.lock.hcl
+# Eval: kết quả chạy (E2) — không commit; baseline được chọn sẽ commit riêng (E4)
+eval/results/
