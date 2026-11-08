@@ -29,3 +29,11 @@ def test_response_dung_dinh_dang():
     assert resp["statusCode"] == 200
     assert resp["headers"]["Content-Type"] == "application/json"
     assert json.loads(resp["body"]) == {"ok": True}
+
+
+def test_question_language():
+    # Code tự xác định ngôn ngữ để ra lệnh cho model (Day 47)
+    assert handler.question_language("What is Kanban?") == "en"
+    assert handler.question_language("Kanban là gì?") == "vi"
+    assert handler.question_language("ĐỊNH NGHĨA WBS") == "vi"  # chữ hoa có dấu
+    assert handler.question_language("Agile la gi") == "en"  # không dấu -> coi là tiếng Anh (đã biết)

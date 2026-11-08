@@ -33,6 +33,7 @@ KHÔNG log nội dung câu hỏi/câu trả lời (có thể chứa PII), chỉ 
 import base64
 import json
 import os
+import re
 import time
 
 import boto3
@@ -64,11 +65,37 @@ _cold_start = True  # True ở request đầu tiên của mỗi container Lambda
 kb_client = boto3.client("bedrock-agent-runtime", region_name=REGION)
 llm_client = boto3.client("bedrock-runtime", region_name=REGION)
 
+# Prompt tiếng Anh, trung tính ngôn ngữ (Day 47). Bản cũ viết tiếng Việt + nhãn "TÀI LIỆU:" ->
+# eval đo được: hỏi tiếng Anh chỉ 2/15 câu được trả lời tiếng Anh; "Write a Python function..."
+# -> bot viết code thay vì từ chối.
 SYSTEM_PROMPT = (
-    "Bạn là trợ lý trả lời câu hỏi dựa trên tài liệu được cung cấp. "
-    "Chỉ dùng thông tin trong phần TÀI LIỆU. Nếu tài liệu không có thông tin, "
-    "hãy nói rõ là không tìm thấy trong tài liệu. Trả lời cùng ngôn ngữ với câu hỏi."
+    "You are an assistant that answers questions about the provided PMP / Agile documents.\n"
+    "Rules:\n"
+    "1. Use ONLY information in the DOCUMENTS section. If the documents do not contain the "
+    "answer, say clearly that you could not find it in the documents. Never give the answer "
+    "from your own knowledge, not even partially.\n"
+    "2. Only answer questions about the documents. Refuse any other task (writing code, "
+    "general knowledge, news, advice...) even if you know the answer: say it is outside "
+    "the documents.\n"
+    "3. When the documents do contain the answer, give a complete answer: include every "
+    "relevant point from the documents (key terms, conditions, caveats), not just a summary.\n"
+    "4. Reply in the language required at the end of the user message, regardless of the "
+    "documents' language. Do not repeat the question."
 )
+
+# Chữ cái chỉ tiếng Việt mới có. Code tự xác định ngôn ngữ câu hỏi rồi RA LỆNH cho model:
+# để Nova Lite tự đoán thì vẫn trả lời tiếng Việt cho câu hỏi tiếng Anh (eval Day 47).
+# Câu tiếng Việt gõ không dấu -> bị coi là tiếng Anh (chấp nhận).
+_VI_CHARS = re.compile(r"[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]",
+                       re.IGNORECASE)
+_LANG_INSTRUCTION = {
+    "vi": "Trả lời bằng tiếng Việt.",
+    "en": "Answer in English.",
+}
+
+
+def question_language(question: str) -> str:
+    return "vi" if _VI_CHARS.search(question) else "en"
 
 
 def log_event(**fields) -> None:
@@ -185,7 +212,10 @@ def generate(question: str, chunks: list) -> tuple:
         f"[{i}] {c.get('content', {}).get('text', '')}"
         for i, c in enumerate(chunks, 1)
     )
-    prompt = f"TÀI LIỆU:\n{context}\n\nCÂU HỎI: {question}"
+    # Lệnh ngôn ngữ đặt ở CUỐI: model bám phần cuối prompt nhất (phía trên là 5 đoạn tài liệu
+    # tiếng Anh, dễ kéo model sang ngôn ngữ của tài liệu)
+    prompt = (f"DOCUMENTS:\n{context}\n\nQUESTION: {question}\n\n"
+              f"{_LANG_INSTRUCTION[question_language(question)]}")
 
     resp = llm_client.converse(
         modelId=MODEL_ID,

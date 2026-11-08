@@ -94,6 +94,29 @@ câu trả lời không có, vẫn tính "đủ").
 -> Vấn đề lớn nhất là **ngôn ngữ**, rồi tới câu bẫy `out-02` và multi_hop thiếu nguồn. Nội dung
 trả lời (bám tài liệu, đủ ý) đã tốt. Sửa `SYSTEM_PROMPT` rồi chạy lại để đo cải thiện bằng số.
 
+## Vòng "sửa → đo" đầu tiên (Day 47): sửa prompt ngôn ngữ + câu bẫy
+
+| Chỉ số | Baseline (03/11) | Sau sửa (08/11) |
+|---|---|---|
+| Trả lời đúng ngôn ngữ | 53.6% (hỏi `en`: 2/15) | **100%** (hỏi `en`: 15/15) |
+| `out_of_doc` từ chối đúng | 83.3% (`out-02` viết code) | **100%** |
+| Groundedness | 96.0% | **100%** |
+| Correctness | 94.7% | 94.0% (≈ như cũ, `doc-12` thiếu 1 ý) |
+| Relevance / nguồn / guardrail | 100% / như cũ / 100% | không đổi |
+| Output token cả bộ | 11.9k | 9.7k |
+
+3 vòng thử (mỗi vòng đo bằng eval, không đoán):
+1. Prompt tiếng Anh + nhắc "trả lời cùng ngôn ngữ câu hỏi" ở cuối → hỏi `en` mới 3/6 đúng, và
+   **`out-01` tụt**: "Thủ đô của Pháp là Paris. Tuy nhiên tài liệu không có...".
+2. **Code tự xác định ngôn ngữ** câu hỏi (chữ có dấu → `vi`) rồi ra lệnh "Answer in English." /
+   "Trả lời bằng tiếng Việt." + cấm trả lời từ kiến thức riêng "kể cả một phần" → ngôn ngữ 100%,
+   từ chối 100%, nhưng **correctness tụt 94.7% → 90.4%**: câu trả lời ngắn đi, bỏ ý có trong tài
+   liệu (`guard-mask-01` mất "pull system").
+3. Thêm quy tắc "tài liệu có thì trả lời đủ mọi ý liên quan" → correctness về 94.0%.
+
+Bài học: sửa 1 lỗi rất dễ làm hỏng chỗ khác (vòng 1 hỏng `out-01`, vòng 2 hỏng độ đầy đủ) — chỉ thấy
+được vì chạy **cả bộ đề** và xem **mọi chỉ số**, không chỉ chỉ số đang sửa.
+
 ## Cấu trúc 1 dòng
 
 | Trường | Bắt buộc | Ý nghĩa |
