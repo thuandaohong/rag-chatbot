@@ -11,6 +11,8 @@ dist/
 *.tfstate.*
 tfplan
 infra/build/
+# Tài liệu nguồn của KB: có bản quyền, KHÔNG commit (repo public). Upload thẳng lên S3.
+sample-data/*.pdf
 # Secrets / môi trường
 .env
 *.csv

@@ -65,18 +65,8 @@ resource "aws_cloudfront_distribution" "web" {
 
 # ---- Bucket policy: cho phép đúng distribution này đọc bucket web ----
 data "aws_iam_policy_document" "web_bucket" {
-  # TODO: statement public này là tàn dư từ lúc host S3 website — xem ghi chú Day 27.
-  # Đang bị vô hiệu bởi public access block (restrict_public_buckets) nhưng nên xóa.
-  statement {
-    sid       = "PublicReadForWebsite"
-    actions   = ["s3:GetObject"]
-    resources = ["${var.web_bucket_arn}/*"]
-    principals {
-      type        = "*"
-      identifiers = ["*"]
-    }
-  }
-
+  # Chỉ CloudFront (OAC) đọc được. Statement "PublicReadForWebsite" (tàn dư thời host S3 website,
+  # Day 27) đã xóa — trước đó nó chỉ bị public access block vô hiệu hóa.
   statement {
     sid       = "AllowCloudFrontServicePrincipal"
     actions   = ["s3:GetObject"]
